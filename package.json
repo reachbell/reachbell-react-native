@@ -1,0 +1,49 @@
+{
+  "name": "@reachbell/react-native",
+  "version": "1.0.0",
+  "description": "ReachBell client SDK for React Native and Expo: register the device's native FCM/APNs push token, identify users and tag devices.",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "react-native": "./dist/index.cjs",
+  "exports": {
+    ".": {
+      "react-native": { "types": "./dist/index.d.cts", "default": "./dist/index.cjs" },
+      "import": { "types": "./dist/index.d.ts", "default": "./dist/index.js" },
+      "require": { "types": "./dist/index.d.cts", "default": "./dist/index.cjs" }
+    },
+    "./package.json": "./package.json"
+  },
+  "files": ["dist", "README.md", "LICENSE"],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run typecheck && npm run test && npm run build"
+  },
+  "keywords": ["reachbell", "push notifications", "react-native", "expo", "fcm", "apns", "firebase messaging", "client sdk"],
+  "author": "DotSpheres Technologies Pvt Ltd",
+  "license": "MIT",
+  "repository": { "type": "git", "url": "git+https://github.com/reachbell/reachbell-react-native.git" },
+  "bugs": { "url": "https://github.com/reachbell/reachbell-react-native/issues" },
+  "homepage": "https://docs.reachbell.com/mobile/react-native",
+  "publishConfig": { "access": "public" },
+  "peerDependencies": {
+    "react-native": ">=0.70",
+    "expo-notifications": ">=0.20",
+    "@react-native-firebase/messaging": ">=18",
+    "@react-native-async-storage/async-storage": ">=1.17"
+  },
+  "peerDependenciesMeta": {
+    "expo-notifications": { "optional": true },
+    "@react-native-firebase/messaging": { "optional": true },
+    "@react-native-async-storage/async-storage": { "optional": true }
+  },
+  "devDependencies": {
+    "tsup": "^8.0.0",
+    "typescript": "^5.0.0",
+    "vitest": "^2.0.0"
+  }
+}
