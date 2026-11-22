@@ -29,7 +29,7 @@ The registered token is persisted with `@react-native-async-storage/async-storag
 
 The SDK loads `expo-notifications`, `@react-native-firebase/messaging` and `@react-native-async-storage/async-storage` with `require()` inside `try`/`catch`, so you only install the ones you use. Metro treats those as optional through `transformer.allowOptionalDependencies`, which current versions of Metro, `@react-native/metro-config` and `expo/metro-config` all turn on.
 
-If the bundle fails with "Unable to resolve module" for one of those three packages and you didn't install it, your Metro config has turned the option off (or uses an older Metro). Turn it back on, after any other config so nothing overrides it:
+If the bundle fails with "Unable to resolve module" for one of those three packages and you didn't install it, the usual cause is that your Metro config has turned the option off (or uses an older Metro). Turn it back on, after any other config so nothing overrides it:
 
 ```js
 // metro.config.js (bare React Native)
@@ -48,6 +48,11 @@ const config = getDefaultConfig(__dirname);
 config.transformer.allowOptionalDependencies = true;
 module.exports = config;
 ```
+
+If the option is on and the error remains:
+
+- **A custom `resolver.resolveRequest`** (common in monorepos and SVG or alias setups) must hand anything it doesn't handle back to `context.resolveRequest(context, moduleName, platform)`. Throwing its own error for an unknown module stops Metro from treating the package as optional.
+- **`register()` resolves `no_push_module` although the package is installed.** Metro didn't bundle it. Check that the package is listed in your app's own `package.json` (not only a workspace root that Metro doesn't watch), then restart Metro with `--reset-cache`.
 
 ## Setup
 
