@@ -1,9 +1,12 @@
-export const SDK_VERSION = "1.0.0";
+export const SDK_VERSION = "2.0.0";
 export const DEFAULT_API_URL = "https://api.reachbell.com";
 export const DEFAULT_TIMEOUT_MS = 15000;
 export const PUBLIC_KEY_PREFIX = "rb_live_";
 export const SECRET_KEY_PREFIX = "rb_secret_";
 export const STORAGE_KEY_PREFIX = "reachbell:token:";
+export const CLEAR_EXTERNAL_ID_KEY_PREFIX = "reachbell:clear_external_id:";
+/** Android counts a device whose shortest side is at least 600dp as a tablet (sw600dp). */
+export const TABLET_MIN_SHORTEST_SIDE_DP = 600;
 export const LOG_PREFIX = "[ReachBell]";
 export const ANDROID_POST_NOTIFICATIONS = "android.permission.POST_NOTIFICATIONS";
 export const ANDROID_NOTIFICATIONS_API_LEVEL = 33;

@@ -99,7 +99,15 @@ export interface AsyncStorageLike {
 }
 
 export interface ReactNativeModule {
-  Platform: { OS: string; Version: number | string };
+  Platform: {
+    OS: string;
+    Version: number | string;
+    /** iOS only. */
+    isPad?: boolean;
+    /** Android: `Release` is the OS version string ("14"); `Version` is the API level. */
+    constants?: { Release?: string };
+  };
+  Dimensions?: { get(dim: "screen" | "window"): { width: number; height: number } };
   PermissionsAndroid?: {
     request(permission: string): Promise<string>;
     PERMISSIONS?: Record<string, string>;
