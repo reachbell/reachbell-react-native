@@ -393,13 +393,97 @@ describe("persistence", () => {
   });
 });
 
+describe("token rotation", () => {
+  it("sends the stored token as previousToken when the token changed", async () => {
+    const storage = memoryStorage();
+    storage.data.set("reachbell:token:rb_live_test", "old-tok");
+    setModules({ expoNotifications: expo({ data: "new-tok" }), asyncStorage: storage });
+    const m = mockFetch();
+
+    expect((await client().register()).success).toBe(true);
+
+    expect(json(m.calls[0])).toMatchObject({ token: "new-tok", previousToken: "old-tok" });
+    expect(storage.data.get("reachbell:token:rb_live_test")).toBe("new-tok");
+  });
+
+  it("omits previousToken on first registration and when the token is unchanged", async () => {
+    setModules({ expoNotifications: expo({ data: "same-tok" }) });
+    const m = mockFetch();
+    const c = client();
+
+    await c.register();
+    await c.register();
+
+    expect(json(m.calls[0]).previousToken).toBeUndefined();
+    expect(json(m.calls[1]).previousToken).toBeUndefined();
+  });
+});
+
+describe("reset / logout", () => {
+  it("unidentifies the stored token before clearing it", async () => {
+    const storage = memoryStorage();
+    setModules({ expoNotifications: expo({ data: "tok-1" }), asyncStorage: storage });
+    const m = mockFetch([{ body: { _id: "s1" } }, { body: { success: true } }]);
+    const c = client();
+    await c.register("user_42");
+
+    expect(await c.reset()).toEqual({ ok: true });
+
+    expect(m.calls[1].url).toBe("https://api.test/subscribers/unidentify");
+    expect(json(m.calls[1])).toEqual({ token: "tok-1" });
+    expect(header(m.calls[1], "x-api-key")).toBe("rb_live_test");
+    expect(await c.getToken()).toBeNull();
+    expect(storage.data.size).toBe(0);
+  });
+
+  it("clears local state even when unidentify fails", async () => {
+    setModules({ expoNotifications: expo({ data: "tok-1" }) });
+    mockFetch();
+    const c = client();
+    await c.register();
+    vi.stubGlobal("fetch", vi.fn(async () => Promise.reject(new TypeError("Network request failed"))));
+
+    expect(await c.unregister()).toEqual({ ok: true });
+    expect(await c.getToken()).toBeNull();
+  });
+
+  it("sends nothing when there is no stored token or no init", async () => {
+    const m = mockFetch();
+    expect(await new ReachBellClient().reset()).toEqual({ ok: true });
+    expect(await client().reset()).toEqual({ ok: true });
+    expect(m.fn).not.toHaveBeenCalled();
+  });
+
+  it("waits for an in-flight register, and later calls wait for the reset", async () => {
+    setModules({ expoNotifications: expo({ data: "tok-1" }) });
+    const m = mockFetch([{ body: { _id: "s1" } }, { body: { success: true } }, { body: { _id: "s2" } }, { body: { success: true } }]);
+    const c = client();
+
+    const first = c.register("user_42");
+    const resetting = c.reset();
+    const second = c.register("user_9");
+    await Promise.all([first, resetting, second]);
+    expect(await c.tag(["new_user"])).toMatchObject({ ok: true });
+
+    expect(m.calls.map((x) => new URL(x.url).pathname)).toEqual([
+      "/subscribers",
+      "/subscribers/unidentify",
+      "/subscribers",
+      "/subscribers/tag",
+    ]);
+    expect(json(m.calls[2])).toMatchObject({ token: "tok-1", externalId: "user_9" });
+    expect(json(m.calls[2]).previousToken).toBeUndefined();
+    expect(await c.getToken()).toBe("tok-1");
+  });
+});
+
 describe("module api", () => {
   it("exposes the documented functions on the namespace and default export", async () => {
     for (const name of ["init", "register", "identify", "tag", "untag", "getToken", "unregister", "reset"] as const) {
       expect(typeof ReachBell[name]).toBe("function");
       expect(typeof ReachBell.default[name]).toBe("function");
     }
-    expect(ReachBell.SDK_VERSION).toBe("1.0.0");
+    expect(ReachBell.SDK_VERSION).toBe("2.0.0");
     setModules({ expoNotifications: expo({ data: "ns-tok" }) });
     mockFetch();
     ReachBell.init({ apiKey: "rb_live_ns" });

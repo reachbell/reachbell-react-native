@@ -19,6 +19,7 @@ export class ReachBellClient {
   private modules: OptionalModules | null = null;
   private store: TokenStore | null = null;
   private pending: Promise<RegisterResult> | null = null;
+  private resetting: Promise<void> | null = null;
 
   init(options: InitOptions): void {
     const apiKey = typeof options?.apiKey === "string" ? options.apiKey.trim() : "";
@@ -41,6 +42,7 @@ export class ReachBellClient {
     this.modules = loadModules();
     this.store = new TokenStore(this.modules.asyncStorage);
     this.pending = null;
+    this.resetting = null;
     this.log("initialized", { apiUrl: this.config.apiUrl, persistent: this.store.persistent });
   }
 
@@ -49,7 +51,7 @@ export class ReachBellClient {
     const run = this.doRegister(externalId)
       .catch((): RegisterResult => ({ success: false, reason: "network_error" }))
       .finally(() => {
-        this.pending = null;
+        if (this.pending === run) this.pending = null;
       });
     this.pending = run;
     return run;
@@ -76,23 +78,67 @@ export class ReachBellClient {
     }
   }
 
-  async unregister(): Promise<ResetResult> {
-    if (this.config && this.store) {
-      try {
-        await this.store.remove(this.storageKey());
-      } catch {
-        return { ok: true };
-      }
-      this.log("cleared stored token");
-    }
-    return { ok: true };
+  /**
+   * Logout. Waits for a register() in flight, unlinks the user from the stored
+   * token with `POST /subscribers/unidentify` (best effort: failures are
+   * ignored), then clears the stored token. register(), identify(), tag() and
+   * untag() called meanwhile wait for it.
+   */
+  unregister(): Promise<ResetResult> {
+    // Only a register() already in flight is waited for; one started after this
+    // call waits for the reset instead.
+    const inFlight = this.pending;
+    this.pending = null;
+    const previous = this.resetting ?? Promise.resolve();
+    const run = previous.then(() => this.doReset(inFlight));
+    const settled = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    this.resetting = settled;
+    void settled.then(() => {
+      if (this.resetting === settled) this.resetting = null;
+    });
+    return run.catch((): ResetResult => ({ ok: true }));
   }
 
   reset(): Promise<ResetResult> {
     return this.unregister();
   }
 
+  private async doReset(inFlight: Promise<RegisterResult> | null): Promise<ResetResult> {
+    if (inFlight) await inFlight;
+    const config = this.config;
+    const store = this.store;
+    if (!config || !store) return { ok: true };
+    const key = this.storageKey();
+    let token: string | null = null;
+    try {
+      token = await store.get(key);
+    } catch {
+      token = null;
+    }
+    if (token) {
+      const outcome = await postJson(config, "/subscribers/unidentify", { token }).catch(
+        (): HttpOutcome => ({ kind: "network" }),
+      );
+      this.log("unidentify", mapAction(outcome));
+    }
+    try {
+      await store.remove(key);
+    } catch {
+      return { ok: true };
+    }
+    this.log("cleared stored token");
+    return { ok: true };
+  }
+
+  private async waitForReset(): Promise<void> {
+    while (this.resetting) await this.resetting;
+  }
+
   private async doRegister(externalId?: string): Promise<RegisterResult> {
+    await this.waitForReset();
     const config = this.config;
     const modules = this.modules;
     const store = this.store;
@@ -123,6 +169,10 @@ export class ReachBellClient {
     };
     const id = typeof externalId === "string" ? externalId.trim() : "";
     if (id) body.externalId = id;
+    // C2: on a token refresh, the API moves tags and externalId from the
+    // previously registered token to this one and deactivates the old row.
+    const previousToken = await store.get(this.storageKey()).catch(() => null);
+    if (previousToken && previousToken !== token) body.previousToken = previousToken;
 
     const outcome = await postJson(config, "/subscribers", body);
     if (outcome.kind === "timeout") return { success: false, reason: "timed_out" };
@@ -140,6 +190,7 @@ export class ReachBellClient {
 
   private async action(path: string, build: (token: string) => Record<string, unknown>): Promise<ActionResult> {
     try {
+      await this.waitForReset();
       const config = this.config;
       if (!config || !this.store) return { ok: false, reason: "sdk_not_initialized" };
       const token = await this.store.get(this.storageKey());

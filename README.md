@@ -27,9 +27,9 @@ The registered token is persisted with `@react-native-async-storage/async-storag
 
 ### Bundler (Metro)
 
-The SDK loads `expo-notifications`, `@react-native-firebase/messaging` and `@react-native-async-storage/async-storage` with `require()` inside `try`/`catch`, so you only install the ones you use. Metro treats those as optional through `transformer.allowOptionalDependencies`, which current versions of Metro, `@react-native/metro-config` and `expo/metro-config` all turn on.
+The SDK loads `expo-notifications`, `@react-native-firebase/messaging` and `@react-native-async-storage/async-storage` with `require()` inside `try`/`catch`, so you only install the ones you use. Metro treats those as optional only when `transformer.allowOptionalDependencies` is on. `@react-native/metro-config` and `expo/metro-config` turn it on in the config they generate. Metro's own default depends on the version: older Metro releases default it to `false`, and current ones (for example Metro 0.87) default it to `true`. So a `metro.config.js` built on `getDefaultConfig()` from either package works, while a hand-written config on an older Metro may not.
 
-If the bundle fails with "Unable to resolve module" for one of those three packages and you didn't install it, the usual cause is that your Metro config has turned the option off (or uses an older Metro). Turn it back on, after any other config so nothing overrides it:
+If the bundle fails with "Unable to resolve module" for one of those three packages and you didn't install it, the usual cause is that your Metro config has turned the option off, or does not start from `@react-native/metro-config` / `expo/metro-config` on an older Metro. Turn it on explicitly, after any other config so nothing overrides it:
 
 ```js
 // metro.config.js (bare React Native)
@@ -109,15 +109,17 @@ await ReachBell.reset();
 
 Use the public key (`rb_live_...`) for your project. Never ship the secret key in an app.
 
+Call `register()` again when the push token rotates, for example from `messaging().onTokenRefresh` (bare React Native) or `Notifications.addPushTokenListener` (Expo). It sends the previously stored token as `previousToken`, and ReachBell carries the old subscriber's tags and external id over, so you do not need to identify or tag again.
+
 | Function | Description |
 |---|---|
 | `init({ apiKey, apiUrl?, timeoutMs?, debug? })` | Configure the SDK. `apiUrl` defaults to `https://api.reachbell.com`, `timeoutMs` to 15000. `debug` logs to the console. |
-| `register(externalId?)` | Request permission, acquire the token, `POST /subscribers`. Passing `externalId` binds the user in the same call. |
+| `register(externalId?)` | Request permission, acquire the token, `POST /subscribers`. Passing `externalId` binds the user in the same call. When the token differs from the stored one, the stored one is sent as `previousToken`, so ReachBell moves its tags and external id to the new token. |
 | `identify(externalId)` | `POST /subscribers/identify` with the stored token. |
 | `tag(tags)` | `POST /subscribers/tag` with the stored token. |
 | `untag(tags)` | `POST /subscribers/untag` with the stored token. |
 | `getToken()` | Resolves the stored device token, or `null` before registration. |
-| `unregister()` / `reset()` | Clear the stored token on this device (for example on logout). The server subscription is not deleted. |
+| `unregister()` / `reset()` | Call on logout. Waits for a `register()` in flight, unlinks the user from the stored token with `POST /subscribers/unidentify` (best effort), then clears the stored token. The device stays subscribed anonymously; `register()`, `identify()`, `tag()` and `untag()` called meanwhile wait for it. |
 
 ## Results
 

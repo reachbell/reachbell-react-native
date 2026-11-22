@@ -1,11 +1,11 @@
-import { readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 
 // Metro only treats a dependency as optional (transformer.allowOptionalDependencies)
 // when it sees a literal require("pkg") directly inside a try block. The README
 // promises that, so check the published build keeps that shape.
-// `npm test` builds first; this reads the fresh dist/.
+// `npm test` builds first; this reads the fresh dist/ in beforeAll.
 const root = join(__dirname, "..");
 const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
 const dist = join(root, "dist");
@@ -24,7 +24,19 @@ function publishedEntries(): string[] {
   return [...entries];
 }
 
+const sources = new Map<string, string>();
+
 describe("published build", () => {
+  // Read dist/ here rather than at module load, so a missing build fails these
+  // tests with a clear message instead of crashing test collection.
+  beforeAll(() => {
+    const missing = [dist, ...publishedEntries().map((e) => join(root, e))].filter((p) => !existsSync(p));
+    if (missing.length > 0) {
+      throw new Error(`build output missing (${missing.join(", ")}); run \`npm run build\` first (\`npm test\` does this)`);
+    }
+    for (const entry of publishedEntries()) sources.set(entry, readFileSync(join(root, entry), "utf8"));
+  });
+
   it("lists every optional peer dependency", () => {
     expect(OPTIONAL).toEqual(
       expect.arrayContaining(["expo-notifications", "@react-native-firebase/messaging", "@react-native-async-storage/async-storage"]),
@@ -38,23 +50,23 @@ describe("published build", () => {
   });
 
   for (const entry of publishedEntries()) {
-    const source = readFileSync(join(root, entry), "utf8");
+    const source = () => sources.get(entry) ?? "";
 
     it(`${entry} has no __require shim`, () => {
-      expect(source).not.toMatch(/__require\(/);
+      expect(source()).not.toMatch(/__require\(/);
     });
 
     it(`${entry} lists its exports for Node's ESM named imports`, () => {
-      expect(source).toMatch(/0 && \(module\.exports = \{[^}]*\binit\b[^}]*\bregister\b/);
+      expect(source()).toMatch(/0 && \(module\.exports = \{[^}]*\binit\b[^}]*\bregister\b/);
     });
 
     for (const name of OPTIONAL) {
       it(`${entry} requires ${name} directly inside a try block`, () => {
         const literal = `require(${JSON.stringify(name)})`;
-        const at = source.indexOf(literal);
+        const at = source().indexOf(literal);
         expect(at, `${literal} not found`).toBeGreaterThan(-1);
         // The nearest enclosing statement before the call must be `try {` within the same function.
-        const before = source.slice(Math.max(0, at - 200), at);
+        const before = source().slice(Math.max(0, at - 200), at);
         expect(before).toMatch(/try\s*\{\s*return\s+(?:\w+\()?$/);
       });
     }

@@ -1,6 +1,6 @@
 {
   "name": "@reachbell/react-native",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "ReachBell client SDK for React Native and Expo: register the device's native FCM/APNs push token, identify users and tag devices.",
   "type": "module",
   "main": "./dist/index.cjs",
@@ -13,7 +13,7 @@
     },
     "./package.json": "./package.json"
   },
-  "files": ["dist", "README.md", "LICENSE"],
+  "files": ["dist", "README.md", "CHANGELOG.md", "LICENSE"],
   "sideEffects": false,
   "scripts": {
     "build": "tsup",
