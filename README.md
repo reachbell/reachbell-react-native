@@ -25,6 +25,30 @@ The SDK detects the installed backend at runtime. Both are optional peer depende
 
 The registered token is persisted with `@react-native-async-storage/async-storage` when it is installed, so `identify()` and `tag()` keep working across app restarts. Without it, an in-memory copy covers the current session.
 
+### Bundler (Metro)
+
+The SDK loads `expo-notifications`, `@react-native-firebase/messaging` and `@react-native-async-storage/async-storage` with `require()` inside `try`/`catch`, so you only install the ones you use. Metro treats those as optional through `transformer.allowOptionalDependencies`, which current versions of Metro, `@react-native/metro-config` and `expo/metro-config` all turn on.
+
+If the bundle fails with "Unable to resolve module" for one of those three packages and you didn't install it, your Metro config has turned the option off (or uses an older Metro). Turn it back on, after any other config so nothing overrides it:
+
+```js
+// metro.config.js (bare React Native)
+const { getDefaultConfig, mergeConfig } = require("@react-native/metro-config");
+
+module.exports = mergeConfig(getDefaultConfig(__dirname), /* your config, */ {
+  transformer: { allowOptionalDependencies: true },
+});
+```
+
+```js
+// metro.config.js (Expo)
+const { getDefaultConfig } = require("expo/metro-config");
+
+const config = getDefaultConfig(__dirname);
+config.transformer.allowOptionalDependencies = true;
+module.exports = config;
+```
+
 ## Setup
 
 Native push credentials are required on both platforms.
@@ -102,17 +126,6 @@ no_token  subscribe_failed_<status>  timed_out  network_error
 ```
 
 `no_push_module` means neither `expo-notifications` nor `@react-native-firebase/messaging` is installed. `subscribe_failed_403` means the plan's subscriber limit was reached.
-
-The SDK loads its optional packages with `require()` inside `try`/`catch`, so you only install the push library you use. Metro allows this through `transformer.allowOptionalDependencies`, which is on in the default configs from `@react-native/metro-config` and `expo/metro-config`. If your app builds its Metro config from scratch and the bundle fails with "Unable to resolve module expo-notifications" (or `@react-native-firebase/messaging`), add it:
-
-```js
-// metro.config.js
-const { getDefaultConfig, mergeConfig } = require("@react-native/metro-config");
-
-module.exports = mergeConfig(getDefaultConfig(__dirname), {
-  transformer: { allowOptionalDependencies: true },
-});
-```
 
 `identify()`, `tag()` and `untag()` resolve `{ ok, updated?, reason? }`. `reason` is one of:
 
