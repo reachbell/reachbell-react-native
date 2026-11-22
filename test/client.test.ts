@@ -385,7 +385,7 @@ describe("persistence", () => {
     expect(await c.getToken()).toBe("t");
     expect(await c.unregister()).toEqual({ ok: true });
     expect(await c.getToken()).toBeNull();
-    expect(storage.data.size).toBe(0);
+    expect(storage.data.has("reachbell:token:rb_live_test")).toBe(false);
     expect(await c.identify("u")).toEqual({ ok: false, reason: "no_subscription" });
     await c.register();
     expect(await c.reset()).toEqual({ ok: true });
@@ -433,7 +433,7 @@ describe("reset / logout", () => {
     expect(json(m.calls[1])).toEqual({ token: "tok-1" });
     expect(header(m.calls[1], "x-api-key")).toBe("rb_live_test");
     expect(await c.getToken()).toBeNull();
-    expect(storage.data.size).toBe(0);
+    expect(storage.data.has("reachbell:token:rb_live_test")).toBe(false);
   });
 
   it("clears local state even when unidentify fails", async () => {
@@ -455,7 +455,11 @@ describe("reset / logout", () => {
   });
 
   it("waits for an in-flight register, and later calls wait for the reset", async () => {
-    setModules({ expoNotifications: expo({ data: "tok-1" }) });
+    // The token rotates between the two registrations, so previousToken would
+    // be sent if the second register ran before the reset cleared the store.
+    const ex = expo({ data: "tok-2" });
+    ex.getDevicePushTokenAsync.mockResolvedValueOnce({ type: "ios", data: "tok-1" });
+    setModules({ expoNotifications: ex });
     const m = mockFetch([{ body: { _id: "s1" } }, { body: { success: true } }, { body: { _id: "s2" } }, { body: { success: true } }]);
     const c = client();
 
@@ -471,9 +475,130 @@ describe("reset / logout", () => {
       "/subscribers",
       "/subscribers/tag",
     ]);
-    expect(json(m.calls[2])).toMatchObject({ token: "tok-1", externalId: "user_9" });
+    expect(json(m.calls[1])).toEqual({ token: "tok-1" });
+    expect(json(m.calls[2])).toMatchObject({ token: "tok-2", externalId: "user_9" });
     expect(json(m.calls[2]).previousToken).toBeUndefined();
-    expect(await c.getToken()).toBe("tok-1");
+    expect(json(m.calls[3]).token).toBe("tok-2");
+    expect(await c.getToken()).toBe("tok-2");
+  });
+
+  it("settles reset -> register -> reset and later calls still run", async () => {
+    setModules({ expoNotifications: expo({ data: "tok-1" }) });
+    const m = mockFetch([{ body: { _id: "s1" } }, { body: { success: true } }, { body: { _id: "s2" } }, { body: { success: true } }]);
+    const c = client();
+    await c.register();
+
+    const settled = await Promise.all([c.reset(), c.register(), c.reset()]);
+    expect(settled).toEqual([{ ok: true }, expect.objectContaining({ success: true, token: "tok-1" }), { ok: true }]);
+    expect(await c.tag(["x"])).toEqual({ ok: false, reason: "no_subscription" });
+    expect((await c.register()).success).toBe(true);
+    expect(await c.tag(["x"])).toMatchObject({ ok: true });
+
+    expect(m.calls.map((x) => new URL(x.url).pathname)).toEqual([
+      "/subscribers",
+      "/subscribers/unidentify",
+      "/subscribers",
+      "/subscribers/unidentify",
+      "/subscribers",
+      "/subscribers/tag",
+    ]);
+  });
+
+  it("sends externalId: null on the first register after reset, persisted across restarts", async () => {
+    const storage = memoryStorage();
+    setModules({ expoNotifications: expo({ data: "tok-1" }), asyncStorage: storage });
+    // Unidentify fails (offline), so only the null externalId can unlink the user.
+    const m = mockFetch([{ body: { _id: "s1" } }, { status: 503 }, { body: { _id: "s1" } }, { body: { _id: "s1" } }]);
+    const c = client();
+    await c.register("user_42");
+    await c.reset();
+    expect(storage.data.get("reachbell:clear_external_id:rb_live_test")).toBe("1");
+
+    // A fresh client (app restart) still sees the pending clear.
+    const restarted = client();
+    expect((await restarted.register()).success).toBe(true);
+    expect(json(m.calls[2])).toHaveProperty("externalId", null);
+    expect(storage.data.has("reachbell:clear_external_id:rb_live_test")).toBe(false);
+
+    await restarted.register();
+    expect(json(m.calls[3])).not.toHaveProperty("externalId");
+  });
+
+  it("keeps the clear pending when the register after reset fails", async () => {
+    setModules({ expoNotifications: expo({ data: "tok-1" }) });
+    const m = mockFetch([{ status: 500 }, { body: { _id: "s1" } }]);
+    const c = client();
+    await c.reset();
+    expect((await c.register()).success).toBe(false);
+    expect((await c.register()).success).toBe(true);
+    expect(json(m.calls[0])).toHaveProperty("externalId", null);
+    expect(json(m.calls[1])).toHaveProperty("externalId", null);
+  });
+
+  it("sends the caller's externalId instead of null after reset", async () => {
+    setModules({ expoNotifications: expo({ data: "tok-1" }) });
+    const m = mockFetch();
+    const c = client();
+    await c.reset();
+    await c.register("user_7");
+    expect(json(m.calls[0])).toMatchObject({ externalId: "user_7" });
+  });
+});
+
+describe("concurrent register", () => {
+  it("links the newest externalId when register(id) is called during a pending register", async () => {
+    setModules({ expoNotifications: expo({ data: "tok-1" }) });
+    const m = mockFetch([{ body: { _id: "s1" } }, { body: { _id: "s1" } }]);
+    const c = client();
+
+    const first = c.register("u1");
+    const second = c.register("u2");
+    const third = c.register();
+    expect(third).toBe(second);
+    const [a, b] = await Promise.all([first, second]);
+
+    expect(a.success && b.success).toBe(true);
+    expect(m.calls.map((x) => json(x).externalId)).toEqual(["u1", "u2"]);
+  });
+
+  it("joins a pending register with the same externalId", async () => {
+    setModules({ expoNotifications: expo({ data: "tok-1" }) });
+    const m = mockFetch();
+    const c = client();
+    const first = c.register("u1");
+    expect(c.register("u1")).toBe(first);
+    expect(c.register()).toBe(first);
+    await first;
+    expect(m.fn).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("device info", () => {
+  it("sends the Android release string as osVersion and detects tablets by shortest side", async () => {
+    const rn = {
+      ...reactNative("android", 34),
+      Platform: { OS: "android", Version: 34, constants: { Release: "14" } },
+      Dimensions: { get: () => ({ width: 800, height: 1280 }) },
+    };
+    setModules({ reactNative: rn, firebaseMessaging: firebaseNamespaced().mod });
+    const m = mockFetch();
+    await client().register();
+    expect(json(m.calls[0])).toMatchObject({ os: "Android", osVersion: "14", device: "tablet" });
+  });
+
+  it("falls back to Platform.Version and mobile", async () => {
+    setModules({ reactNative: reactNative("android", 34), firebaseMessaging: firebaseNamespaced().mod });
+    const m = mockFetch();
+    await client().register();
+    expect(json(m.calls[0])).toMatchObject({ osVersion: "34", device: "mobile" });
+  });
+
+  it("reports an iPad as a tablet", async () => {
+    const rn = { ...reactNative("ios"), Platform: { OS: "ios", Version: "17.4", isPad: true } };
+    setModules({ reactNative: rn, expoNotifications: expo() });
+    const m = mockFetch();
+    await client().register();
+    expect(json(m.calls[0])).toMatchObject({ os: "iOS", osVersion: "17.4", device: "tablet" });
   });
 });
 

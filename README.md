@@ -119,7 +119,7 @@ Call `register()` again when the push token rotates, for example from `messaging
 | `tag(tags)` | `POST /subscribers/tag` with the stored token. |
 | `untag(tags)` | `POST /subscribers/untag` with the stored token. |
 | `getToken()` | Resolves the stored device token, or `null` before registration. |
-| `unregister()` / `reset()` | Call on logout. Waits for a `register()` in flight, unlinks the user from the stored token with `POST /subscribers/unidentify` (best effort), then clears the stored token. The device stays subscribed anonymously; `register()`, `identify()`, `tag()` and `untag()` called meanwhile wait for it. |
+| `unregister()` / `reset()` | Call on logout. Waits for a `register()` in flight, unlinks the user from the stored token with `POST /subscribers/unidentify` (best effort), then clears the stored token. The next `register()` without an external id sends `externalId: null` so the server unlinks the user even if unidentify failed. The device stays subscribed anonymously; `register()`, `identify()`, `tag()` and `untag()` called meanwhile wait for it. |
 
 ## Results
 
