@@ -1,6 +1,8 @@
 export const SDK_VERSION = "2.0.0";
 export const DEFAULT_API_URL = "https://api.reachbell.com";
 export const DEFAULT_TIMEOUT_MS = 15000;
+/** Permission prompt + push token acquisition, matching Android's tokenFetchTimeoutMs. */
+export const DEFAULT_TOKEN_TIMEOUT_MS = 30000;
 export const PUBLIC_KEY_PREFIX = "rb_live_";
 export const SECRET_KEY_PREFIX = "rb_secret_";
 export const STORAGE_KEY_PREFIX = "reachbell:token:";

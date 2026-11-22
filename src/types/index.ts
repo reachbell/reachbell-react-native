@@ -2,6 +2,8 @@ export interface InitOptions {
   apiKey: string;
   apiUrl?: string;
   timeoutMs?: number;
+  /** How long register() waits for the permission prompt and the push token. Default 30000. */
+  tokenTimeoutMs?: number;
   debug?: boolean;
 }
 
@@ -17,6 +19,8 @@ export type RegisterReason =
   | "no_push_module"
   | "permission_denied"
   | "no_token"
+  | "token_timeout"
+  | "reinitialized"
   | `subscribe_failed_${number}`
   | "timed_out"
   | "network_error";
@@ -126,6 +130,7 @@ export interface ClientConfig {
   apiKey: string;
   apiUrl: string;
   timeoutMs: number;
+  tokenTimeoutMs: number;
   debug: boolean;
 }
 

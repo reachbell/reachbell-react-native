@@ -169,6 +169,33 @@ function firebaseBackend(mod: NonNullable<OptionalModules["firebaseMessaging"]>,
   };
 }
 
+/**
+ * backend.acquire() bounded by timeoutMs. A permission prompt or token fetch
+ * that never settles resolves { ok: false, reason: "token_timeout" }, so the
+ * register queue moves on; the abandoned call's late result is ignored.
+ */
+export function acquireWithTimeout(
+  backend: PushBackend,
+  platform: DevicePlatform,
+  timeoutMs: number,
+): Promise<PushTokenOutcome | { ok: false; reason: "token_timeout" }> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve({ ok: false, reason: "token_timeout" }), timeoutMs);
+    const done = (outcome: PushTokenOutcome) => {
+      clearTimeout(timer);
+      resolve(outcome);
+    };
+    let pending: Promise<PushTokenOutcome>;
+    try {
+      pending = backend.acquire(platform);
+    } catch {
+      done(NO_TOKEN);
+      return;
+    }
+    pending.then(done, () => done(NO_TOKEN));
+  });
+}
+
 export function detectBackend(modules: OptionalModules): PushBackend | null {
   if (isFirebaseUsable(modules.firebaseMessaging)) return firebaseBackend(modules.firebaseMessaging, modules.reactNative);
   if (isExpoUsable(modules.expoNotifications)) return expoBackend(modules.expoNotifications);

@@ -113,7 +113,7 @@ Call `register()` again when the push token rotates, for example from `messaging
 
 | Function | Description |
 |---|---|
-| `init({ apiKey, apiUrl?, timeoutMs?, debug? })` | Configure the SDK. `apiUrl` defaults to `https://api.reachbell.com`, `timeoutMs` to 15000. `debug` logs to the console. |
+| `init({ apiKey, apiUrl?, timeoutMs?, tokenTimeoutMs?, debug? })` | Configure the SDK. `apiUrl` defaults to `https://api.reachbell.com`, `timeoutMs` (per API request) to 15000. `tokenTimeoutMs` (permission prompt plus push token) defaults to 30000. `debug` logs to the console. Calling `init()` again, for example with another `apiKey`, makes a `register()` or `reset()` still running for the previous configuration finish without touching local state; such a `register()` resolves `reason: "reinitialized"`. |
 | `register(externalId?)` | Request permission, acquire the token, `POST /subscribers`. Passing `externalId` binds the user in the same call. When the token differs from the stored one, the stored one is sent as `previousToken`, so ReachBell moves its tags and external id to the new token. |
 | `identify(externalId)` | `POST /subscribers/identify` with the stored token. |
 | `tag(tags)` | `POST /subscribers/tag` with the stored token. |
@@ -129,10 +129,11 @@ No function throws. Each resolves with a plain result object.
 
 ```
 sdk_not_initialized  unsupported_platform  no_push_module  permission_denied
-no_token  subscribe_failed_<status>  timed_out  network_error
+no_token  token_timeout  reinitialized  subscribe_failed_<status>
+timed_out  network_error
 ```
 
-`no_push_module` means neither `expo-notifications` nor `@react-native-firebase/messaging` is installed. `subscribe_failed_403` means the plan's subscriber limit was reached.
+`no_push_module` means neither `expo-notifications` nor `@react-native-firebase/messaging` is installed. `token_timeout` means the permission prompt or the push module did not answer within `tokenTimeoutMs`; later `register()` and `reset()` calls are not held up by it. `reinitialized` means `init()` was called again while this `register()` ran, so its result was discarded. `subscribe_failed_403` means the plan's subscriber limit was reached.
 
 `identify()`, `tag()` and `untag()` resolve `{ ok, updated?, reason? }`. `reason` is one of:
 
@@ -141,6 +142,14 @@ sdk_not_initialized  no_subscription  server_<status>  timed_out  network_error
 ```
 
 or a reason returned by the API, such as `subscriber_not_found`. `no_subscription` means the device has not registered yet; call `register()` first.
+
+`identify()`, `tag()` and `untag()` wait for a `reset()` already queued, but not for a `register()`. After `reset()` the stored token is gone, so `tag()` called right after `reset(); register();` without awaiting `register()` sees no token and resolves `no_subscription`. Await `register()` first:
+
+```ts
+await ReachBell.reset();
+await ReachBell.register();
+await ReachBell.tag(["guest"]);
+```
 
 Displaying and handling received notifications stays with your notification library: `Notifications.addNotificationReceivedListener` on Expo, `messaging().onMessage` and `messaging().setBackgroundMessageHandler` on bare React Native.
 

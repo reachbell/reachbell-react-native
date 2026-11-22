@@ -573,6 +573,71 @@ describe("concurrent register", () => {
   });
 });
 
+describe("token timeout", () => {
+  it("resolves token_timeout when the push module never answers, and the queue moves on", async () => {
+    const ex = expo({ data: "tok-2" });
+    ex.getDevicePushTokenAsync.mockImplementationOnce(() => new Promise(() => undefined));
+    setModules({ expoNotifications: ex });
+    const m = mockFetch();
+    const c = new ReachBellClient();
+    c.init({ apiKey: "rb_live_test", apiUrl: "https://api.test/", tokenTimeoutMs: 20 });
+
+    const first = c.register("u1");
+    const resetting = c.reset();
+    const second = c.register("u2");
+    expect(await first).toEqual({ success: false, reason: "token_timeout" });
+    expect(await resetting).toEqual({ ok: true });
+    expect(await second).toMatchObject({ success: true, token: "tok-2" });
+    expect(m.calls.map((x) => json(x).externalId)).toEqual(["u2"]);
+  });
+
+  it("defaults to 30s", async () => {
+    vi.useFakeTimers();
+    try {
+      const ex = expo();
+      ex.getDevicePushTokenAsync.mockImplementationOnce(() => new Promise(() => undefined));
+      setModules({ expoNotifications: ex });
+      mockFetch();
+      const c = client();
+      let settled: unknown = null;
+      void c.register().then((r) => (settled = r));
+      await vi.advanceTimersByTimeAsync(29_000);
+      expect(settled).toBeNull();
+      await vi.advanceTimersByTimeAsync(1_500);
+      expect(settled).toEqual({ success: false, reason: "token_timeout" });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("re-init", () => {
+  it("drops a register in flight under the old api key", async () => {
+    let release: (v: { type: string; data: string }) => void = () => undefined;
+    const ex = expo({ data: "tok-new" });
+    ex.getDevicePushTokenAsync.mockImplementationOnce(() => new Promise((r) => (release = r)));
+    const storage = memoryStorage();
+    setModules({ expoNotifications: ex, asyncStorage: storage });
+    const m = mockFetch();
+    const c = new ReachBellClient();
+    c.init({ apiKey: "rb_live_old", apiUrl: "https://api.test/" });
+
+    const stale = c.register("u1");
+    await new Promise((r) => setTimeout(r, 0));
+    c.init({ apiKey: "rb_live_new", apiUrl: "https://api.test/" });
+    release({ type: "ios", data: "tok-old" });
+
+    expect(await stale).toEqual({ success: false, reason: "reinitialized" });
+    expect(m.fn).not.toHaveBeenCalled();
+    expect(storage.data.has("reachbell:token:rb_live_old")).toBe(false);
+    expect(storage.data.has("reachbell:token:rb_live_new")).toBe(false);
+
+    expect((await c.register()).success).toBe(true);
+    expect(header(m.calls[0], "x-api-key")).toBe("rb_live_new");
+    expect(await c.getToken()).toBe("tok-new");
+  });
+});
+
 describe("device info", () => {
   it("sends the Android release string as osVersion and detects tablets by shortest side", async () => {
     const rn = {
